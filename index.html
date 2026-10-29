@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evaluator</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS (xlsx) CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Distinct Column Color Tokens */
+        .col-submark { background-color: #e0f2fe !important; color: #0369a1 !important; text-align: right; font-weight: 600; }
+        .col-qtotal { background-color: #fef08a !important; color: #854d0e !important; font-weight: 700; text-align: right; }
+        .col-finaltotal { background-color: #bbf7d0 !important; color: #166534 !important; font-weight: 700; text-align: right; }
+        .col-text { text-align: left; max-width: 250px; word-wrap: break-word; color: #334155; }
+
+        /* Custom Table Scrollbar */
+        .scrollable-container::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .scrollable-container::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        .scrollable-container::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen p-3 gap-3">
+
+    <!-- Top Compact Header Bar -->
+    <header class="flex items-center justify-between bg-slate-800 border border-slate-700 px-4 py-2.5 rounded-lg shrink-0">
+        <div class="flex items-center gap-3">
+            <h1 class="text-xl font-bold tracking-wider text-blue-400">Evaluator</h1>
+            <span id="studentCounter" class="bg-slate-700 text-slate-300 text-xs px-2.5 py-0.5 rounded-full font-mono">0 Records</span>
+        </div>
+        
+        <div class="flex items-center gap-2">
+            <button onclick="copyPrompt()" class="bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs font-semibold px-3 py-1.5 rounded transition flex items-center gap-1.5">
+                📋 Copy Prompt
+            </button>
+            <button onclick="downloadExcel()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded transition flex items-center gap-1.5 shadow-sm">
+                📊 Download Excel (.xlsx)
+            </button>
+            <button onclick="clearData()" class="bg-rose-950/60 hover:bg-rose-900 text-rose-300 text-xs font-medium px-2.5 py-1.5 rounded border border-rose-800/50 transition">
+                Clear All
+            </button>
+        </div>
+    </header>
+
+    <!-- Top Fixed Area: Raw JSON Input -->
+    <section class="bg-slate-800 border border-slate-700 p-3 rounded-lg flex flex-col gap-2 shrink-0">
+        <div class="flex items-center justify-between">
+            <label for="jsonInput" class="text-xs font-semibold text-slate-300 uppercase tracking-wider">Paste JSON Result</label>
+            <span id="statusToast" class="text-xs text-emerald-400 font-medium hidden">✓ Added to table</span>
+        </div>
+        
+        <div class="flex gap-2">
+            <textarea id="jsonInput" rows="2" class="flex-1 font-mono text-xs p-2.5 bg-slate-900 text-slate-200 border border-slate-700 rounded focus:outline-none focus:border-blue-500 transition resize-none" placeholder='Paste JSON object or array here...'></textarea>
+            
+            <button onclick="addResult()" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-4 rounded transition shrink-0 flex items-center justify-center">
+                + Add Record
+            </button>
+        </div>
+    </section>
+
+    <!-- Bottom Scrollable Table Workspace -->
+    <main class="flex-1 bg-slate-900 border border-slate-700 rounded-lg overflow-hidden flex flex-col min-h-0">
+        
+        <!-- Legend Strip -->
+        <div class="flex items-center gap-4 px-3 py-1.5 bg-slate-800/80 border-b border-slate-700 text-[11px] font-medium text-slate-300 shrink-0">
+            <span class="text-slate-400">Colors:</span>
+            <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-sky-200 border border-sky-400 inline-block"></span> Sub Scores</span>
+            <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-yellow-200 border border-yellow-400 inline-block"></span> Question Total</span>
+            <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-green-200 border border-green-400 inline-block"></span> Final Total</span>
+        </div>
+
+        <!-- Scrollable Table -->
+        <div class="scrollable-container flex-1 overflow-auto">
+            <table id="evaluationTable" class="w-full text-xs text-slate-200 border-collapse">
+                <thead class="bg-slate-950 text-slate-300 uppercase text-[10px] tracking-wider sticky top-0 z-10 shadow-sm">
+                    <tr id="tableHeader">
+                        <th class="p-2.5 border border-slate-800 text-left bg-slate-950">Email</th>
+                        <th class="p-2.5 border border-slate-800 text-left bg-slate-950">Student Name</th>
+                        <th class="p-2.5 border border-slate-800 text-center bg-slate-950">Status</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody" class="divide-y divide-slate-800 bg-white">
+                    <tr>
+                        <td colspan="3" class="p-8 text-center text-slate-500 bg-slate-900 italic">
+                            Table empty. Paste JSON result above and click "+ Add Record".
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <!-- System Prompt Holder (Hidden string source for Copy Prompt) -->
+    <pre class="hidden" id="promptTemplate">You are "Evaluator", an AI grading assistant.
+
+Task: Evaluate student answers against the Question Paper and Rubric.
+
+Output Format: Output ONLY a valid JSON array block formatted as:
+[
+  {
+    "email": "student@email.com",
+    "student_name": "Student Name",
+    "questions": [
+      {
+        "question_id": "Q1",
+        "sub_questions": { "a": 8, "b": 9 },
+        "rubric_breakdown": "Q1a: 8/10. Q1b: 9/10.",
+        "remarks": "Feedback here",
+        "question_total": 17
+      }
+    ],
+    "final_grand_total": 17
+  }
+]</pre>
+
+    <script>
+        let studentData = [];
+        let schemaMap = [];
+
+        function addResult() {
+            const inputEl = document.getElementById('jsonInput');
+            const val = inputEl.value.trim();
+
+            if (!val) return;
+
+            try {
+                let jsonStr = val;
+                const match = val.match(/\[\s*\{[\s\S]*\}\s*\]|\{[\s\S]*\}/);
+                if (match) jsonStr = match[0];
+
+                const parsed = JSON.parse(jsonStr);
+                const records = Array.isArray(parsed) ? parsed : [parsed];
+
+                records.forEach(rec => {
+                    if (rec.student_name || rec.email) {
+                        studentData.push(rec);
+                    }
+                });
+
+                rebuildSchema();
+                renderTable();
+
+                inputEl.value = '';
+                showToast();
+
+            } catch (err) {
+                alert("Invalid JSON format: " + err.message);
+            }
+        }
+
+        function rebuildSchema() {
+            schemaMap = [];
+            studentData.forEach(student => {
+                if (!student.questions) return;
+                student.questions.forEach(q => {
+                    let entry = schemaMap.find(item => item.qId === q.question_id);
+                    if (!entry) {
+                        entry = { qId: q.question_id, subKeys: new Set() };
+                        schemaMap.push(entry);
+                    }
+                    if (q.sub_questions) {
+                        Object.keys(q.sub_questions).forEach(k => entry.subKeys.add(k));
+                    }
+                });
+            });
+        }
+
+        function renderTable() {
+            const thead = document.getElementById('tableHeader');
+            const tbody = document.getElementById('tableBody');
+            const counter = document.getElementById('studentCounter');
+
+            counter.innerText = `${studentData.length} Record${studentData.length === 1 ? '' : 's'}`;
+
+            if (studentData.length === 0) {
+                thead.innerHTML = `
+                    <tr>
+                        <th class="p-2.5 border border-slate-800 text-left bg-slate-950">Email</th>
+                        <th class="p-2.5 border border-slate-800 text-left bg-slate-950">Student Name</th>
+                        <th class="p-2.5 border border-slate-800 text-center bg-slate-950">Status</th>
+                    </tr>
+                `;
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="3" class="p-8 text-center text-slate-500 bg-slate-900 italic">
+                            Table empty. Paste JSON result above and click "+ Add Record".
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            // Headers - Email ID as the first column
+            let hHTML = `
+                <th class="p-2.5 border border-slate-800 text-left bg-slate-950 min-w-[140px]">Email</th>
+                <th class="p-2.5 border border-slate-800 text-left bg-slate-950 min-w-[130px]">Student Name</th>
+            `;
+
+            schemaMap.forEach(q => {
+                Array.from(q.subKeys).forEach(k => {
+                    hHTML += `<th class="p-2.5 border border-slate-800 text-right bg-sky-950 text-sky-200">${q.qId} (${k})</th>`;
+                });
+                hHTML += `<th class="p-2.5 border border-slate-800 text-left bg-slate-950 min-w-[160px]">${q.qId} Rubric</th>`;
+                hHTML += `<th class="p-2.5 border border-slate-800 text-left bg-slate-950 min-w-[140px]">${q.qId} Remarks</th>`;
+                hHTML += `<th class="p-2.5 border border-slate-800 text-right bg-amber-950 text-amber-200">${q.qId} Total</th>`;
+            });
+
+            hHTML += `<th class="p-2.5 border border-slate-800 text-right bg-emerald-950 text-emerald-200">Final Total</th>`;
+            hHTML += `<th class="p-2.5 border border-slate-800 text-center bg-slate-950"></th>`;
+
+            thead.innerHTML = hHTML;
+
+            // Rows - Email ID as first column value
+            let bHTML = '';
+            studentData.forEach((student, idx) => {
+                bHTML += `<tr class="hover:bg-slate-50 transition-colors">`;
+                bHTML += `<td class="p-2.5 border border-slate-200 font-mono text-slate-600">${escape(student.email || '')}</td>`;
+                bHTML += `<td class="p-2.5 border border-slate-200 font-semibold text-slate-900">${escape(student.student_name)}</td>`;
+
+                schemaMap.forEach(qMap => {
+                    const qObj = (student.questions || []).find(q => q.question_id === qMap.qId) || {};
+
+                    Array.from(qMap.subKeys).forEach(k => {
+                        const score = (qObj.sub_questions && qObj.sub_questions[k] !== undefined) ? qObj.sub_questions[k] : '-';
+                        bHTML += `<td class="p-2.5 border border-slate-200 col-submark">${score}</td>`;
+                    });
+
+                    bHTML += `<td class="p-2.5 border border-slate-200 col-text">${escape(qObj.rubric_breakdown || '-')}</td>`;
+                    bHTML += `<td class="p-2.5 border border-slate-200 col-text">${escape(qObj.remarks || '-')}</td>`;
+                    bHTML += `<td class="p-2.5 border border-slate-200 col-qtotal">${qObj.question_total !== undefined ? qObj.question_total : '-'}</td>`;
+                });
+
+                bHTML += `<td class="p-2.5 border border-slate-200 col-finaltotal">${student.final_grand_total !== undefined ? student.final_grand_total : '-'}</td>`;
+                bHTML += `
+                    <td class="p-2 border border-slate-200 text-center bg-white">
+                        <button onclick="removeRow(${idx})" class="text-slate-400 hover:text-red-600 font-bold px-1" title="Delete">✕</button>
+                    </td>
+                `;
+                bHTML += `</tr>`;
+            });
+
+            tbody.innerHTML = bHTML;
+        }
+
+        function removeRow(i) {
+            studentData.splice(i, 1);
+            rebuildSchema();
+            renderTable();
+        }
+
+        function clearData() {
+            if (studentData.length === 0) return;
+            if (confirm("Clear all rows?")) {
+                studentData = [];
+                schemaMap = [];
+                renderTable();
+            }
+        }
+
+        function downloadExcel() {
+            if (studentData.length === 0) {
+                alert("No records to export.");
+                return;
+            }
+
+            let headers = ["Email ID", "Student Name"];
+            schemaMap.forEach(qMap => {
+                Array.from(qMap.subKeys).forEach(k => headers.push(`${qMap.qId} (${k})`));
+                headers.push(`${qMap.qId} Rubric Breakdown`, `${qMap.qId} Remarks`, `${qMap.qId} Total`);
+            });
+            headers.push("Final Grand Total");
+
+            let rows = [headers];
+
+            studentData.forEach(student => {
+                let r = [student.email || '', student.student_name];
+                schemaMap.forEach(qMap => {
+                    const qObj = (student.questions || []).find(q => q.question_id === qMap.qId) || {};
+                    Array.from(qMap.subKeys).forEach(k => {
+                        r.push((qObj.sub_questions && qObj.sub_questions[k] !== undefined) ? qObj.sub_questions[k] : '');
+                    });
+                    r.push(qObj.rubric_breakdown || '', qObj.remarks || '', qObj.question_total !== undefined ? qObj.question_total : '');
+                });
+                r.push(student.final_grand_total !== undefined ? student.final_grand_total : '');
+                rows.push(r);
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Grades");
+            XLSX.writeFile(wb, "Evaluator_Grades.xlsx");
+        }
+
+        function copyPrompt() {
+            const text = document.getElementById('promptTemplate').innerText;
+            const textarea = document.createElement("textarea");
+            textarea.value = text;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            alert("Prompt copied to clipboard!");
+        }
+
+        function showToast() {
+            const t = document.getElementById('statusToast');
+            t.classList.remove('hidden');
+            setTimeout(() => t.classList.add('hidden'), 2000);
+        }
+
+        function escape(s) {
+            if (typeof s !== 'string') return s;
+            return s.replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c] || c));
+        }
+    </script>
+</body>
+</html>
