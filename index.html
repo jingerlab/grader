@@ -6,8 +6,8 @@
     <title>Evaluator</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- SheetJS (xlsx) CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.min.js"></script>
+    <!-- ExcelJS CDN for full cell styling & fill colors in .xlsx exports -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body {
@@ -281,32 +281,99 @@ Output Format: Output ONLY a valid JSON array block formatted as:
                 return;
             }
 
+            // Create ExcelJS Workbook & Sheet
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet("Evaluator Grades");
+
+            // Define Header Row
             let headers = ["Email ID", "Student Name"];
+            let colTypeMap = ["text", "text"]; // Track column types for styling
+
             schemaMap.forEach(qMap => {
-                Array.from(qMap.subKeys).forEach(k => headers.push(`${qMap.qId} (${k})`));
+                Array.from(qMap.subKeys).forEach(k => {
+                    headers.push(`${qMap.qId} (${k})`);
+                    colTypeMap.push("submark");
+                });
                 headers.push(`${qMap.qId} Rubric Breakdown`, `${qMap.qId} Remarks`, `${qMap.qId} Total`);
+                colTypeMap.push("text", "text", "qtotal");
             });
+
             headers.push("Final Grand Total");
+            colTypeMap.push("finaltotal");
 
-            let rows = [headers];
+            // Add Header Row
+            const headerRow = worksheet.addRow(headers);
+            headerRow.eachCell((cell) => {
+                cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: "FF0F172A" } }; // Slate-900 header
+                cell.alignment = { vertical: 'middle', horizontal: 'center' };
+            });
 
+            // Color definitions (ARGB)
+            const COLOR_SUBMARK = "FFE0F2FE";     // Light Blue
+            const COLOR_QTOTAL = "FFFEE08A";      // Light Yellow
+            const COLOR_FINALTOTAL = "FFBBF7D0";  // Light Green
+
+            // Add Data Rows with exact color fills
             studentData.forEach(student => {
-                let r = [student.email || '', student.student_name];
+                let rowValues = [student.email || '', student.student_name];
+
                 schemaMap.forEach(qMap => {
                     const qObj = (student.questions || []).find(q => q.question_id === qMap.qId) || {};
                     Array.from(qMap.subKeys).forEach(k => {
-                        r.push((qObj.sub_questions && qObj.sub_questions[k] !== undefined) ? qObj.sub_questions[k] : '');
+                        const val = (qObj.sub_questions && qObj.sub_questions[k] !== undefined) ? qObj.sub_questions[k] : '';
+                        rowValues.push(val);
                     });
-                    r.push(qObj.rubric_breakdown || '', qObj.remarks || '', qObj.question_total !== undefined ? qObj.question_total : '');
+                    rowValues.push(qObj.rubric_breakdown || '', qObj.remarks || '', qObj.question_total !== undefined ? qObj.question_total : '');
                 });
-                r.push(student.final_grand_total !== undefined ? student.final_grand_total : '');
-                rows.push(r);
+
+                rowValues.push(student.final_grand_total !== undefined ? student.final_grand_total : '');
+
+                const row = worksheet.addRow(rowValues);
+
+                // Apply cell background colors based on column map
+                row.eachCell((cell, colNumber) => {
+                    const type = colTypeMap[colNumber - 1];
+                    
+                    // Borders
+                    cell.border = {
+                        top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+                        left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+                        bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+                        right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
+                    };
+
+                    if (type === 'submark') {
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_SUBMARK } };
+                        cell.font = { bold: true, color: { argb: "FF0369A1" } };
+                        cell.alignment = { horizontal: 'right' };
+                    } else if (type === 'qtotal') {
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_QTOTAL } };
+                        cell.font = { bold: true, color: { argb: "FF854D0E" } };
+                        cell.alignment = { horizontal: 'right' };
+                    } else if (type === 'finaltotal') {
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_FINALTOTAL } };
+                        cell.font = { bold: true, color: { argb: "FF166534" } };
+                        cell.alignment = { horizontal: 'right' };
+                    }
+                });
             });
 
-            const ws = XLSX.utils.aoa_to_sheet(rows);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "Grades");
-            XLSX.writeFile(wb, "Evaluator_Grades.xlsx");
+            // Set column widths automatically
+            worksheet.columns.forEach(column => {
+                column.width = 18;
+            });
+
+            // Trigger file download
+            workbook.xlsx.writeBuffer().then(buffer => {
+                const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "Evaluator_Grades_ColorCoded.xlsx";
+                a.click();
+                window.URL.revokeObjectURL(url);
+            });
         }
 
         function copyPrompt() {
